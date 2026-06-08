@@ -5,6 +5,9 @@ import com.duoc.guias.dto.ApiResponse;
 import com.duoc.guias.dto.CrearGuiaRequest;
 import com.duoc.guias.dto.GuiaDTO;
 import com.duoc.guias.service.GuiaService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
@@ -27,6 +30,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/guias")
+@Tag(name = "Guias de Despacho", description = "Crear, subir a S3, descargar, actualizar, eliminar y consultar guias de despacho")
 public class GuiaController {
 
     private final GuiaService guiaService;
@@ -36,6 +40,8 @@ public class GuiaController {
     }
 
     // Endpoint 1: crear guia de despacho (genera el PDF en el EFS)
+    @Operation(summary = "1. Crear guia de despacho",
+            description = "Crea la guia y genera su PDF en el almacenamiento temporal EFS.")
     @PostMapping
     public ResponseEntity<ApiResponse<GuiaDTO>> crear(@Valid @RequestBody CrearGuiaRequest req) {
         GuiaDTO created = guiaService.crear(req);
@@ -44,6 +50,8 @@ public class GuiaController {
     }
 
     // Endpoint 2: subir la guia generada a S3
+    @Operation(summary = "2. Subir guia a AWS S3",
+            description = "Sube el PDF de la guia a S3 en la carpeta {yyyyMMdd}/{transportista}/guia{numero}.pdf.")
     @PostMapping("/{id}/s3")
     public ApiResponse<GuiaDTO> subirAS3(@PathVariable Long id) {
         return ApiResponse.ok("Guia subida a AWS S3 correctamente", guiaService.subirAS3(id));
@@ -51,8 +59,11 @@ public class GuiaController {
 
     // Endpoint 3: descargar guia con validacion de permisos
     // El transportista solicitante se envia en el header X-Transportista
+    @Operation(summary = "3. Descargar guia (con validacion de permisos)",
+            description = "Descarga el PDF. Solo el transportista dueño puede hacerlo; se indica en el header X-Transportista.")
     @GetMapping("/{id}/descargar")
     public ResponseEntity<byte[]> descargar(@PathVariable Long id,
+                                            @Parameter(description = "Transportista dueño de la guia", example = "TransportistaX")
                                             @RequestHeader("X-Transportista") String transportista) {
         GuiaDTO guia = guiaService.obtenerDTO(id);
         byte[] contenido = guiaService.descargar(id, transportista);
@@ -64,6 +75,8 @@ public class GuiaController {
     }
 
     // Endpoint 4: modificar / actualizar guia (regenera PDF y re-sube a S3)
+    @Operation(summary = "4. Modificar / actualizar guia",
+            description = "Actualiza los datos, regenera el PDF en EFS y lo re-sube a S3 (si ya estaba subida).")
     @PutMapping("/{id}")
     public ApiResponse<GuiaDTO> actualizar(@PathVariable Long id,
                                            @Valid @RequestBody ActualizarGuiaRequest req) {
@@ -71,6 +84,8 @@ public class GuiaController {
     }
 
     // Endpoint 5: eliminar guia especifica (de S3, EFS y BD)
+    @Operation(summary = "5. Eliminar guia",
+            description = "Elimina la guia de AWS S3, del EFS y de la base de datos.")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> eliminar(@PathVariable Long id) {
         guiaService.eliminar(id);
@@ -78,6 +93,8 @@ public class GuiaController {
     }
 
     // Endpoint 6: consultar guias por transportista y fecha (historial)
+    @Operation(summary = "6. Consultar guias por transportista y fecha",
+            description = "Lista las guias. Filtra por transportista y/o fecha (ambos parametros son opcionales).")
     @GetMapping
     public ApiResponse<List<GuiaDTO>> consultar(
             @RequestParam(required = false) String transportista,
@@ -88,6 +105,8 @@ public class GuiaController {
     }
 
     // Detalle individual de una guia (apoyo a la demo)
+    @Operation(summary = "Detalle de una guia",
+            description = "Devuelve los datos de una guia por su id.")
     @GetMapping("/{id}")
     public ApiResponse<GuiaDTO> obtener(@PathVariable Long id) {
         return ApiResponse.ok("Guia recuperada correctamente", guiaService.obtenerDTO(id));
