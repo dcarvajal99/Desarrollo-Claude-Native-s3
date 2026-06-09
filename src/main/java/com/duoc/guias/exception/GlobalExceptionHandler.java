@@ -21,6 +21,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.NOT_FOUND, ex.getMessage(), req);
     }
 
+    // Credenciales invalidas en el login -> 401
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ErrorResponse> handleUnauthorized(UnauthorizedException ex, HttpServletRequest req) {
+        return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), req);
+    }
+
     // Falla de almacenamiento (EFS/S3) -> 502 Bad Gateway (dependencia externa)
     @ExceptionHandler(StorageException.class)
     public ResponseEntity<ErrorResponse> handleStorage(StorageException ex, HttpServletRequest req) {

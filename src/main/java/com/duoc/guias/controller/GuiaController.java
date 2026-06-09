@@ -6,7 +6,7 @@ import com.duoc.guias.dto.CrearGuiaRequest;
 import com.duoc.guias.dto.GuiaDTO;
 import com.duoc.guias.service.GuiaService;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -14,13 +14,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,7 +30,8 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/guias")
-@Tag(name = "Guias de Despacho", description = "Crear, subir a S3, descargar, actualizar, eliminar y consultar guias de despacho")
+@Tag(name = "Guias de Despacho", description = "Crear, subir a S3, descargar, actualizar, eliminar y consultar guias de despacho. Requiere token JWT.")
+@SecurityRequirement(name = "bearerAuth")
 public class GuiaController {
 
     private final GuiaService guiaService;
@@ -58,13 +59,12 @@ public class GuiaController {
     }
 
     // Endpoint 3: descargar guia con validacion de permisos
-    // El transportista solicitante se envia en el header X-Transportista
+    // El transportista solicitante se obtiene del token JWT (usuario autenticado)
     @Operation(summary = "3. Descargar guia (con validacion de permisos)",
-            description = "Descarga el PDF. Solo el transportista dueño puede hacerlo; se indica en el header X-Transportista.")
+            description = "Descarga el PDF. Solo el transportista dueño (identificado por su token JWT) puede hacerlo.")
     @GetMapping("/{id}/descargar")
-    public ResponseEntity<byte[]> descargar(@PathVariable Long id,
-                                            @Parameter(description = "Transportista dueño de la guia", example = "TransportistaX")
-                                            @RequestHeader("X-Transportista") String transportista) {
+    public ResponseEntity<byte[]> descargar(@PathVariable Long id, Authentication authentication) {
+        String transportista = authentication.getName(); // username del token
         GuiaDTO guia = guiaService.obtenerDTO(id);
         byte[] contenido = guiaService.descargar(id, transportista);
         String filename = "guia" + guia.getNumeroGuia() + ".pdf";

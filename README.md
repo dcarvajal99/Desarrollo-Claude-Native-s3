@@ -27,13 +27,41 @@ exception/   GlobalExceptionHandler, ResourceNotFoundException, StorageException
 
 Flujo de almacenamiento: **EFS (temporal) → S3 (definitivo)**.
 
-## Endpoints REST
+## Seguridad (JWT)
+
+Los endpoints de `/api/guias/**` requieren un **token JWT**. El flujo es:
+
+1. `POST /api/auth/login` con `{ "username": "...", "password": "..." }` → devuelve un `token`.
+2. Enviar ese token en cada request a `/api/guias` con el header
+   `Authorization: Bearer <token>`.
+
+En **Swagger** usa el botón **Authorize** (candado) y pega solo el token.
+
+**Transportistas precargados (demo):**
+
+| Usuario | Clave | Rol |
+|---------|-------|-----|
+| `TransportistaX` | `1234` | TRANSPORTISTA |
+| `TransportistaHermes` | `1234` | TRANSPORTISTA |
+| `admin` | `admin1234` | ADMIN |
+
+La **descarga** valida que el transportista del token sea el **dueño** de la guía
+(si otro intenta descargarla, responde 404).
+
+### Endpoints de autenticación (abiertos)
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `POST` | `/api/auth/login`    | Inicia sesión; devuelve token JWT |
+| `POST` | `/api/auth/register` | Registra un transportista nuevo (clave BCrypt) |
+
+## Endpoints REST (requieren token)
 
 | # | Método | Ruta | Descripción |
 |---|--------|------|-------------|
 | 1 | `POST`   | `/api/guias`               | Crear guía (genera el PDF en el EFS) |
 | 2 | `POST`   | `/api/guias/{id}/s3`       | Subir la guía generada a AWS S3 |
-| 3 | `GET`    | `/api/guias/{id}/descargar`| Descargar guía con validación de permisos (header `X-Transportista`) |
+| 3 | `GET`    | `/api/guias/{id}/descargar`| Descargar guía con validación de permisos (dueño = transportista del token) |
 | 4 | `PUT`    | `/api/guias/{id}`          | Modificar / actualizar guía (regenera PDF y re-sube a S3) |
 | 5 | `DELETE` | `/api/guias/{id}`          | Eliminar guía (de S3, EFS y BD) |
 | 6 | `GET`    | `/api/guias?transportista=&fecha=` | Consultar guías por transportista y fecha |

@@ -1,6 +1,7 @@
 package com.duoc.guias.dto;
 
 import com.duoc.guias.model.Guia;
+import com.duoc.guias.model.Transportista;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -8,6 +9,12 @@ import java.util.List;
 
 @Component
 public class EntityMapper {
+
+    // ----- Transportista (usuario) -> nunca expone la password -----
+    public TransportistaDTO toDTO(Transportista t) {
+        if (t == null) return null;
+        return new TransportistaDTO(t.getId(), t.getUsername(), t.getRole());
+    }
 
     public GuiaDTO toDTO(Guia guia) {
         if (guia == null) return null;
