@@ -132,5 +132,3 @@ Este montaje (`-v /mnt/efs:/app/efs`) ya está incluido en el paso 6 del pipelin
 SSH a la EC2 → `docker run` montando el EFS. Secrets requeridos en el repo:
 `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 `AWS_SESSION_TOKEN`, `S3_BUCKET`, `EC2_HOST`, `USER_SERVER`, `EC2_SSH_KEY`.
-
-esto es una prueba de commit para subir el proyecto a github y probar el pipeline de despliegue automatico a docker hub y ec2
