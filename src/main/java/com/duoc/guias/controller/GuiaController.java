@@ -14,7 +14,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -59,12 +60,13 @@ public class GuiaController {
     }
 
     // Endpoint 3: descargar guia con validacion de permisos
-    // El transportista solicitante se obtiene del token JWT (usuario autenticado)
+    // El transportista solicitante se obtiene del claim "sub" del token JWT de Azure AD.
     @Operation(summary = "3. Descargar guia (con validacion de permisos)",
-            description = "Descarga el PDF. Solo el transportista dueño (identificado por su token JWT) puede hacerlo.")
+            description = "Descarga el PDF. Solo el transportista dueño (identificado por el claim 'sub' de su token de Azure) puede hacerlo.")
     @GetMapping("/{id}/descargar")
-    public ResponseEntity<byte[]> descargar(@PathVariable Long id, Authentication authentication) {
-        String transportista = authentication.getName(); // username del token
+    public ResponseEntity<byte[]> descargar(@PathVariable Long id,
+                                            @AuthenticationPrincipal Jwt jwt) {
+        String transportista = jwt.getSubject(); // claim "sub" del token de Azure AD
         GuiaDTO guia = guiaService.obtenerDTO(id);
         byte[] contenido = guiaService.descargar(id, transportista);
         String filename = "guia" + guia.getNumeroGuia() + ".pdf";

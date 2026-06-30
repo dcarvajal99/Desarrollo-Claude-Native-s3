@@ -55,29 +55,25 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
-        <!-- Seguridad: autenticacion/autorizacion de transportistas con JWT -->
+        <!-- Seguridad: Spring Security (cadena de filtros, autorizacion) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
 
-        <!-- JWT (jjwt 0.12.x): firma HS512 de los tokens de sesion -->
+        <!-- OAuth2 Resource Server: valida los JWT emitidos por Azure AD (IDaaS).
+             Trae oauth2-resource-server + oauth2-jose (decodificacion/verificacion
+             de la firma RS256 contra las claves publicas del issuer). Semana 5. -->
         <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-api</artifactId>
-            <version>0.12.6</version>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
         </dependency>
+
+        <!-- Utilidades de test para Spring Security (con*, jwt() en MockMvc) -->
         <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-impl</artifactId>
-            <version>0.12.6</version>
-            <scope>runtime</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt-jackson</artifactId>
-            <version>0.12.6</version>
-            <scope>runtime</scope>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
         </dependency>
 
         <!-- AOP con AspectJ (LoggingAspect) -->

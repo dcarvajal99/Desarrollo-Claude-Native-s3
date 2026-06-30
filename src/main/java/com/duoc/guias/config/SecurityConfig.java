@@ -1,45 +1,59 @@
 package com.duoc.guias.config;
 
 import com.duoc.guias.dto.ErrorResponse;
-import com.duoc.guias.security.JwtAuthenticationFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtDecoders;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+import java.util.List;
 
 /**
- * Seguridad stateless con JWT.
- * Abierto: login/register, Swagger UI, OpenAPI, actuator/health y la consola H2.
- * Protegido: todo /api/guias/** (exige Authorization: Bearer <token>).
+ * Seguridad como OAuth2 Resource Server (Semana 5 - Exp 2).
+ *
+ * El backend ya NO emite tokens propios: ahora valida los JWT (RS256) emitidos por
+ * Azure AD (IDaaS). Spring Security descarga las claves publicas del issuer y verifica
+ * la firma, la expiracion, el issuer (iss) y la audiencia (aud) de cada request.
+ *
+ * Abierto: Swagger UI, OpenAPI, actuator/health, info y la consola H2.
+ * Protegido: todo lo demas (las guias) exige Authorization: Bearer &lt;token de Azure&gt;.
  */
 @Configuration
+@EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    // Servidor de validacion (Azure AD). Se configura en application.properties:
+    //   spring.security.oauth2.resourceserver.jwt.issuer-uri=...
+    @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
+    private String issuerUri;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
-        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
-    }
+    // Audiencia esperada del token (claim aud = Client ID de la API en Azure).
+    // Si se deja vacio, no se valida la audiencia (solo issuer + firma + expiracion).
+    @Value("${app.oauth2.audience:}")
+    private String audience;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -49,34 +63,46 @@ public class SecurityConfig {
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 // --- rutas abiertas ---
-                .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
                 .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**",
                         "/v3/api-docs.yaml", "/swagger-resources/**").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/h2-console/**").permitAll()
-                // --- todo lo demas (las guias) requiere token ---
+                // --- todo lo demas (las guias) requiere un JWT valido de Azure ---
                 .anyRequest().authenticated()
             )
+            // Activa la validacion de tokens JWT (filtro BearerTokenAuthenticationFilter)
+            .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
             .exceptionHandling(eh -> eh
                 .authenticationEntryPoint(authenticationEntryPoint())
                 .accessDeniedHandler(accessDeniedHandler())
-            )
-            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+            );
 
         return http.build();
     }
 
+    /**
+     * Decoder del JWT con validacion explicita de issuer (siempre) y audiencia (si se
+     * configuro app.oauth2.audience). El issuer-uri lo lee Spring del properties para
+     * descubrir las claves publicas de Azure (.well-known/openid-configuration).
+     */
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+    public JwtDecoder jwtDecoder() {
+        NimbusJwtDecoder decoder = (NimbusJwtDecoder) JwtDecoders.fromIssuerLocation(issuerUri);
+
+        OAuth2TokenValidator<Jwt> withIssuer = JwtValidators.createDefaultWithIssuer(issuerUri);
+        if (audience != null && !audience.isBlank()) {
+            OAuth2TokenValidator<Jwt> audienceValidator = new JwtClaimValidator<List<String>>(
+                    JwtClaimNames.AUD,
+                    aud -> aud != null && aud.contains(audience));
+            decoder.setJwtValidator(new org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator<>(
+                    withIssuer, audienceValidator));
+        } else {
+            decoder.setJwtValidator(withIssuer);
+        }
+        return decoder;
     }
 
-    @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
-        return config.getAuthenticationManager();
-    }
-
-    // Peticion sin token a un recurso protegido -> 401 con ErrorResponse JSON
+    // Peticion sin token (o token invalido) a un recurso protegido -> 401 con ErrorResponse JSON
     @Bean
     public AuthenticationEntryPoint authenticationEntryPoint() {
         ObjectMapper mapper = jsonMapper();
@@ -84,7 +110,7 @@ public class SecurityConfig {
             ErrorResponse body = new ErrorResponse(
                     HttpStatus.UNAUTHORIZED.value(),
                     HttpStatus.UNAUTHORIZED.getReasonPhrase(),
-                    "Se requiere un token JWT valido para acceder a este recurso",
+                    "Se requiere un token JWT valido emitido por Azure AD para acceder a este recurso",
                     request.getRequestURI());
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -93,22 +119,17 @@ public class SecurityConfig {
         };
     }
 
-    // Autenticado pero sin permiso -> 403; anonimo -> 401
+    // Autenticado pero sin permiso sobre el recurso -> 403
     @Bean
     public AccessDeniedHandler accessDeniedHandler() {
         ObjectMapper mapper = jsonMapper();
         return (request, response, accessDeniedException) -> {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            boolean isAnonymous = auth == null || auth instanceof AnonymousAuthenticationToken || !auth.isAuthenticated();
-
-            HttpStatus status = isAnonymous ? HttpStatus.UNAUTHORIZED : HttpStatus.FORBIDDEN;
-            String message = isAnonymous
-                    ? "Se requiere un token JWT valido para acceder a este recurso"
-                    : "No tiene permisos para acceder a este recurso";
-
-            ErrorResponse body = new ErrorResponse(status.value(), status.getReasonPhrase(), message,
+            ErrorResponse body = new ErrorResponse(
+                    HttpStatus.FORBIDDEN.value(),
+                    HttpStatus.FORBIDDEN.getReasonPhrase(),
+                    "No tiene permisos para acceder a este recurso",
                     request.getRequestURI());
-            response.setStatus(status.value());
+            response.setStatus(HttpStatus.FORBIDDEN.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.setCharacterEncoding("UTF-8");
             mapper.writeValue(response.getWriter(), body);

@@ -61,6 +61,8 @@ jobs:
             docker stop desarrollo-claude-native-s3 || true && docker rm desarrollo-claude-native-s3 || true
             # Iniciar el contenedor montando el volumen EFS (/mnt/efs del host -> /app/efs del contenedor)
             # y pasando las credenciales/datos de AWS S3 como variables de entorno.
+            # La config de Azure AD (issuer/audience para validar los JWT) ya viene con su valor
+            # por defecto en application.properties, por lo que no necesita variables aqui.
             docker run -d --name desarrollo-claude-native-s3 \
               -v /mnt/efs:/app/efs \
               -e EFS_PATH=/app/efs \
