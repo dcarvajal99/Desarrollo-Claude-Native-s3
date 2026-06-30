@@ -124,7 +124,7 @@ Las **credenciales de AWS** NO se escriben en el código: el SDK usa
 
 ## EFS en el contenedor
 
-En la EC2 el disco EFS se monta en `/mnt/efs` y se inyecta al contenedor con:
+En la EC2 el disco EFS se monta en `/mnt/efs` y se inyecta al contenedor con::
 
 ```bash
 docker run -d --name desarrollo-claude-native-s3 \
