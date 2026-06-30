@@ -37,6 +37,11 @@ public class GuiaController {
 
     private final GuiaService guiaService;
 
+    // Claim del token de Azure B2C que identifica al transportista dueño (Semana 6).
+    // Se crea en Azure como custom attribute "nombreTransportista" -> extension_nombreTransportista.
+    @org.springframework.beans.factory.annotation.Value("${app.oauth2.transportista-claim:extension_nombreTransportista}")
+    private String transportistaClaim;
+
     public GuiaController(GuiaService guiaService) {
         this.guiaService = guiaService;
     }
@@ -60,13 +65,18 @@ public class GuiaController {
     }
 
     // Endpoint 3: descargar guia con validacion de permisos
-    // El transportista solicitante se obtiene del claim "sub" del token JWT de Azure AD.
+    // El transportista solicitante se obtiene del custom claim "extension_nombreTransportista"
+    // del token de Azure B2C. Si no viene, cae al "sub" como respaldo.
     @Operation(summary = "3. Descargar guia (con validacion de permisos)",
-            description = "Descarga el PDF. Solo el transportista dueño (identificado por el claim 'sub' de su token de Azure) puede hacerlo.")
+            description = "Descarga el PDF. Solo el transportista dueño (identificado por el claim de nombre de su token de Azure B2C) puede hacerlo. Requiere rol 'descarga'.")
     @GetMapping("/{id}/descargar")
     public ResponseEntity<byte[]> descargar(@PathVariable Long id,
                                             @AuthenticationPrincipal Jwt jwt) {
-        String transportista = jwt.getSubject(); // claim "sub" del token de Azure AD
+        // nombre del transportista desde el custom claim; respaldo al sub si no existe
+        String transportista = jwt.getClaimAsString(transportistaClaim);
+        if (transportista == null || transportista.isBlank()) {
+            transportista = jwt.getSubject();
+        }
         GuiaDTO guia = guiaService.obtenerDTO(id);
         byte[] contenido = guiaService.descargar(id, transportista);
         String filename = "guia" + guia.getNumeroGuia() + ".pdf";
