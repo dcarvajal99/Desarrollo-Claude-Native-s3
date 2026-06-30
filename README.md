@@ -1,15 +1,24 @@
 # Desarrollo-Claude-Native-s3
 
 Microservicio del **Sistema de Gestión de Pedidos y Generación de Guías de Despacho**
-(Semana 3 · *Desarrollo Cloud Native* · CDY2204 · Duoc UC).
+(*Desarrollo Cloud Native* · CDY2204 · Duoc UC).
 
 Una empresa transportista genera **guías de despacho** en PDF, las guarda
 temporalmente en un **EFS** y las publica en **AWS S3** organizadas por fecha y
-transportista. El despliegue es automático vía **GitHub Actions** (Docker Hub → EC2).
+transportista. Los endpoints se exponen detrás de un **API Gateway (AWS)** y se
+autentican/autorizan con **Azure AD B2C (IDaaS)** mediante **OAuth2 + roles**.
+El despliegue es automático vía **GitHub Actions** (Docker Hub → EC2).
+
+> **Evolución del proyecto**
+> - **Semana 3:** EFS + S3 + CI/CD (con login JWT propio, ya retirado).
+> - **Semana 5:** se reemplaza el login propio por **OAuth2 Resource Server** validando
+>   tokens JWT de **Azure AD** + registro de endpoints en **API Gateway**. Ver `SEMANA-05-OAUTH2-AZURE.md`.
+> - **Semana 6:** se agrega **autorización por roles** con *custom claims* de **Azure AD B2C**.
+>   Ver `SEMANA-06-ROLES.md`.
 
 ## Arquitectura
 
-Arquitectura por capas (mismo patrón que la Semana 1):
+Arquitectura por capas:
 
 ```
 controller/  GuiaController        -> 6 endpoints REST + detalle
@@ -21,51 +30,67 @@ model/       Guia                  -> entidad JPA
 dto/         CrearGuiaRequest, ActualizarGuiaRequest, GuiaDTO,
              ApiResponse, ErrorResponse, EntityMapper
 config/      S3Config              -> bean S3Client (DefaultCredentialsProvider)
+             SecurityConfig        -> OAuth2 Resource Server + autorización por roles
+             OpenApiConfig         -> Swagger UI
 aspect/      LoggingAspect         -> @Around sobre la capa service
 exception/   GlobalExceptionHandler, ResourceNotFoundException, StorageException
 ```
 
 Flujo de almacenamiento: **EFS (temporal) → S3 (definitivo)**.
 
-## Seguridad (JWT)
+## Seguridad — OAuth2 + Azure AD B2C + Roles
 
-Los endpoints de `/api/guias/**` requieren un **token JWT**. El flujo es:
+El backend es un **OAuth2 Resource Server**: NO emite tokens, **valida** los JWT (RS256)
+emitidos por **Azure AD B2C**. De cada request comprueba firma, issuer, audiencia,
+expiración y el **rol** del usuario.
 
-1. `POST /api/auth/login` con `{ "username": "...", "password": "..." }` → devuelve un `token`.
-2. Enviar ese token en cada request a `/api/guias` con el header
-   `Authorization: Bearer <token>`.
+### Doble capa de seguridad
+1. **API Gateway (AWS):** un *JWT Authorizer* valida el token de Azure a nivel de API.
+2. **Spring Security (backend):** vuelve a validar el token y, además, **autoriza por rol**.
 
-En **Swagger** usa el botón **Authorize** (candado) y pega solo el token.
+### Dos roles (custom claim `extension_consultaRole`)
 
-**Transportistas precargados (demo):**
+| Rol | Permiso |
+|-----|---------|
+| **gestion**  | Crear, subir a S3, actualizar, eliminar, consultar |
+| **descarga** | SOLO descargar guías (y solo las **propias**) |
 
-| Usuario | Clave | Rol |
-|---------|-------|-----|
-| `TransportistaX` | `1234` | TRANSPORTISTA |
-| `TransportistaHermes` | `1234` | TRANSPORTISTA |
-| `admin` | `admin1234` | ADMIN |
+La **descarga** valida además que el `extension_nombreTransportista` del token sea el
+**dueño** de la guía (si otro lo intenta, responde 403/404).
 
-La **descarga** valida que el transportista del token sea el **dueño** de la guía
-(si otro intenta descargarla, responde 404).
+### Cómo obtener el token
 
-### Endpoints de autenticación (abiertos)
+No hay login propio. El token se obtiene desde **Azure AD B2C** (Run user flow → jwt.ms,
+o con OAuth2 en Postman) y se envía en cada request:
 
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| `POST` | `/api/auth/login`    | Inicia sesión; devuelve token JWT |
-| `POST` | `/api/auth/register` | Registra un transportista nuevo (clave BCrypt) |
+```
+Authorization: Bearer <token de Azure>
+```
 
-## Endpoints REST (requieren token)
+En **Swagger** usa el botón **Authorize** (candado) y pega el token.
 
-| # | Método | Ruta | Descripción |
-|---|--------|------|-------------|
-| 1 | `POST`   | `/api/guias`               | Crear guía (genera el PDF en el EFS) |
-| 2 | `POST`   | `/api/guias/{id}/s3`       | Subir la guía generada a AWS S3 |
-| 3 | `GET`    | `/api/guias/{id}/descargar`| Descargar guía con validación de permisos (dueño = transportista del token) |
-| 4 | `PUT`    | `/api/guias/{id}`          | Modificar / actualizar guía (regenera PDF y re-sube a S3) |
-| 5 | `DELETE` | `/api/guias/{id}`          | Eliminar guía (de S3, EFS y BD) |
-| 6 | `GET`    | `/api/guias?transportista=&fecha=` | Consultar guías por transportista y fecha |
-|   | `GET`    | `/api/guias/{id}`          | Detalle de una guía (apoyo a la demo) |
+## Endpoints REST (requieren token de Azure + rol)
+
+| # | Método | Ruta | Rol | Descripción |
+|---|--------|------|-----|-------------|
+| 1 | `POST`   | `/api/guias`               | `gestion`  | Crear guía (genera el PDF en el EFS) |
+| 2 | `POST`   | `/api/guias/{id}/s3`       | `gestion`  | Subir la guía generada a AWS S3 |
+| 3 | `GET`    | `/api/guias/{id}/descargar`| `descarga` | Descargar guía (valida que seas el dueño) |
+| 4 | `PUT`    | `/api/guias/{id}`          | `gestion`  | Modificar / actualizar guía (regenera PDF y re-sube a S3) |
+| 5 | `DELETE` | `/api/guias/{id}`          | `gestion`  | Eliminar guía (de S3, EFS y BD) |
+| 6 | `GET`    | `/api/guias?transportista=&fecha=` | `gestion` | Consultar guías por transportista y fecha |
+|   | `GET`    | `/api/guias/{id}`          | `gestion`  | Detalle de una guía (apoyo a la demo) |
+
+**Rutas públicas** (sin token): `/actuator/health`, `/actuator/info`, Swagger UI, consola H2.
+
+### Comportamiento esperado
+
+| Caso | Respuesta |
+|------|-----------|
+| Sin token | **401** |
+| Token válido, rol que no aplica al endpoint | **403** |
+| Rol `descarga` intenta descargar guía ajena | **403/404** (no es el dueño) |
+| Rol y dueño correctos | **200** (+ PDF en descargar) |
 
 ### Organización en S3
 
@@ -73,19 +98,24 @@ Cada guía se sube con una *key* organizada por **fecha** y **transportista**:
 
 ```
 {yyyyMMdd}/{transportista}/guia{numero}.pdf
-ej:  20210101/transportistax/guia123.pdf
+ej:  20210101/transportistadiego/guia123.pdf
 ```
 
 ## Configuración
 
 `src/main/resources/application.properties` (todo parametrizable por variables de entorno):
 
-| Propiedad | Env var | Default | Descripción |
-|-----------|---------|---------|-------------|
-| `app.efs.path` | `EFS_PATH` | `./efs-local` | Carpeta del EFS (en el contenedor: `/app/efs`) |
-| `app.s3.bucket`| `S3_BUCKET`| `guias-despacho-duoc` | Bucket de S3 |
-| `app.s3.region`| `AWS_REGION`| `us-east-1` | Región de AWS |
-| `app.s3.endpoint`| `S3_ENDPOINT`| *(vacío)* | Endpoint S3 alternativo (tests / emuladores) |
+| Propiedad | Env var | Descripción |
+|-----------|---------|-------------|
+| `app.efs.path` | `EFS_PATH` | Carpeta del EFS (en el contenedor: `/app/efs`) |
+| `app.s3.bucket`| `S3_BUCKET`| Bucket de S3 |
+| `app.s3.region`| `AWS_REGION`| Región de AWS |
+| `spring.security.oauth2.resourceserver.jwt.issuer-uri` | `OAUTH2_ISSUER_URI` | Issuer de Azure B2C (debe coincidir EXACTO con el `iss` del token, con `/v2.0/` final) |
+| `spring.security.oauth2.resourceserver.jwt.jwk-set-uri` | `OAUTH2_JWKS_URI` | Claves públicas (jwks) de B2C para validar la firma |
+| `app.oauth2.audience` | `OAUTH2_AUDIENCE` | Audiencia esperada (Client ID de la API) |
+| `app.oauth2.role-claim` | `OAUTH2_ROLE_CLAIM` | Claim del rol (def: `extension_consultaRole`) |
+| `app.oauth2.role-descarga` / `role-gestion` | — | Valores de los dos roles |
+| `app.oauth2.transportista-claim` | `OAUTH2_TRANSPORTISTA_CLAIM` | Claim del dueño (def: `extension_nombreTransportista`) |
 
 Las **credenciales de AWS** NO se escriben en el código: el SDK usa
 `DefaultCredentialsProvider` (variables de entorno / instance profile /
@@ -106,25 +136,29 @@ docker run -d --name desarrollo-claude-native-s3 \
 ```
 
 Este montaje (`-v /mnt/efs:/app/efs`) ya está incluido en el paso 6 del pipeline
-`.github/workflows/deploy.yml`.
+`.github/workflows/deploy.yml`. El issuer/audience de Azure tienen su valor por defecto
+en `application.properties` (no requieren variables en el `docker run`).
 
 ## Ejecutar localmente
 
 ```bash
 ./mvnw spring-boot:run        # http://localhost:8080
-./mvnw test                   # corre las pruebas (EFS + S3 + servicio)
+./mvnw test                   # corre las pruebas (EFS + S3 + servicio + contexto)
 ```
 
 > En local, sin credenciales de AWS, los endpoints que tocan S3 fallarán con
 > `502` (StorageException); el resto del flujo (crear/consultar/descargar desde EFS)
 > funciona contra `./efs-local`.
+>
+> Para validar tokens reales de Azure B2C en local, la app necesita acceso a internet
+> (descarga las claves públicas del `jwk-set-uri`).
 
 ## Pruebas
 
 - `EfsStorageServiceTest` — genera un PDF real (firma `%PDF`) en un `@TempDir`, lo lee y lo elimina.
 - `S3StorageServiceTest` — `S3Client` simulado con Mockito: verifica la key por fecha/transportista y subir/descargar/eliminar.
 - `GuiaServiceTest` — orquestación de los 6 endpoints con EFS y S3 mockeados (incluida la validación de permisos de descarga).
-- `GuiasApplicationTests` — el contexto Spring levanta (con `S3Client` mock).
+- `GuiasApplicationTests` — el contexto Spring levanta (con `S3Client` y `JwtDecoder` mock, perfil `test`).
 
 ## Despliegue (CI/CD)
 
@@ -132,3 +166,6 @@ Este montaje (`-v /mnt/efs:/app/efs`) ya está incluido en el paso 6 del pipelin
 SSH a la EC2 → `docker run` montando el EFS. Secrets requeridos en el repo:
 `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 `AWS_SESSION_TOKEN`, `S3_BUCKET`, `EC2_HOST`, `USER_SERVER`, `EC2_SSH_KEY`.
+
+> **AWS Academy:** las credenciales (`AWS_*`) son temporales; refréscalas en los
+> *Secrets* de GitHub cada vez que reinicies el laboratorio antes de desplegar.
