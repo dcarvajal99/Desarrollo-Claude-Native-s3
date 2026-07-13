@@ -1,4 +1,4 @@
-# Desarrollo-Claude-Native-s3
+# Desarrollo-Claude-Native
 
 Microservicio del **Sistema de Gestión de Pedidos y Generación de Guías de Despacho**
 (*Desarrollo Cloud Native* · CDY2204 · Duoc UC).
