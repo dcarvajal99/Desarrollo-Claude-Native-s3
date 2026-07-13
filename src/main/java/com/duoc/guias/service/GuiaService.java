@@ -3,6 +3,7 @@ package com.duoc.guias.service;
 import com.duoc.guias.dto.ActualizarGuiaRequest;
 import com.duoc.guias.dto.CrearGuiaRequest;
 import com.duoc.guias.dto.EntityMapper;
+import com.duoc.guias.dto.EventoGuiaDTO;
 import com.duoc.guias.dto.GuiaDTO;
 import com.duoc.guias.exception.ResourceNotFoundException;
 import com.duoc.guias.exception.StorageException;
@@ -31,13 +32,16 @@ public class GuiaService {
     private final EfsStorageService efsStorage;
     private final S3StorageService s3Storage;
     private final EntityMapper mapper;
+    private final GuiaEventProducer eventProducer;
 
     public GuiaService(GuiaRepository guiaRepository, EfsStorageService efsStorage,
-                       S3StorageService s3Storage, EntityMapper mapper) {
+                       S3StorageService s3Storage, EntityMapper mapper,
+                       GuiaEventProducer eventProducer) {
         this.guiaRepository = guiaRepository;
         this.efsStorage = efsStorage;
         this.s3Storage = s3Storage;
         this.mapper = mapper;
+        this.eventProducer = eventProducer;
     }
 
     // ---- Endpoint 1: crear guia de despacho (genera el PDF en el EFS) ----
@@ -51,7 +55,14 @@ public class GuiaService {
         // 1) generar el PDF en el almacenamiento temporal EFS
         Path archivo = efsStorage.generarPdf(guia);
         guia.setEfsPath(archivo.toString());
-        return mapper.toDTO(guiaRepository.save(guia));
+        GuiaDTO dto = mapper.toDTO(guiaRepository.save(guia));
+
+        // Semana 8: publicar el evento en la Cola 1. Si el request pide forzar un error,
+        // el evento se marca para que el consumidor lo rechace (y caiga en la Cola 2).
+        EventoGuiaDTO evento = EventoGuiaDTO.de("CREADA", dto);
+        evento.setForzarError(req.isForzarError());
+        eventProducer.publicar(evento);
+        return dto;
     }
 
     // ---- Endpoint 2: subir la guia generada a S3 ----
@@ -66,7 +77,9 @@ public class GuiaService {
         String key = s3Storage.subir(guia, archivo);
         guia.setS3Key(key);
         guia.setSubidaS3(true);
-        return mapper.toDTO(guiaRepository.save(guia));
+        GuiaDTO dto = mapper.toDTO(guiaRepository.save(guia));
+        eventProducer.publicar(EventoGuiaDTO.de("SUBIDA_S3", dto)); // Semana 8
+        return dto;
     }
 
     // ---- Endpoint 3: descargar guia con validacion de permisos ----
@@ -112,7 +125,9 @@ public class GuiaService {
             guia.setS3Key(nuevaKey);
             guia.setSubidaS3(true);
         }
-        return mapper.toDTO(guiaRepository.save(guia));
+        GuiaDTO dto = mapper.toDTO(guiaRepository.save(guia));
+        eventProducer.publicar(EventoGuiaDTO.de("ACTUALIZADA", dto)); // Semana 8
+        return dto;
     }
 
     // ---- Endpoint 5: eliminar guia (borra de S3, EFS y BD) ----
@@ -122,7 +137,10 @@ public class GuiaService {
             s3Storage.eliminar(guia.getS3Key());
         }
         efsStorage.eliminarPdf(rutaEfs(guia));
+        // Semana 8: capturar los datos para el evento ANTES de borrar la entidad
+        GuiaDTO dto = mapper.toDTO(guia);
         guiaRepository.delete(guia);
+        eventProducer.publicar(EventoGuiaDTO.de("ELIMINADA", dto));
     }
 
     // ---- Endpoint 6: consultar guias por transportista y/o fecha (historial) ----

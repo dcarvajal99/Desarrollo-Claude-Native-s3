@@ -8,6 +8,7 @@ import com.duoc.guias.exception.ResourceNotFoundException;
 import com.duoc.guias.model.Guia;
 import com.duoc.guias.repository.GuiaRepository;
 import com.duoc.guias.service.EfsStorageService;
+import com.duoc.guias.service.GuiaEventProducer;
 import com.duoc.guias.service.GuiaService;
 import com.duoc.guias.service.S3StorageService;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +41,7 @@ class GuiaServiceTest {
     private GuiaRepository repo;
     private EfsStorageService efs;
     private S3StorageService s3;
+    private GuiaEventProducer eventProducer;
     private GuiaService service;
 
     @BeforeEach
@@ -47,7 +49,8 @@ class GuiaServiceTest {
         repo = mock(GuiaRepository.class);
         efs = mock(EfsStorageService.class);
         s3 = mock(S3StorageService.class);
-        service = new GuiaService(repo, efs, s3, new EntityMapper());
+        eventProducer = mock(GuiaEventProducer.class); // Semana 8: no publica a RabbitMQ en el test
+        service = new GuiaService(repo, efs, s3, new EntityMapper(), eventProducer);
 
         // por defecto, save devuelve la misma entidad
         when(repo.save(any(Guia.class))).thenAnswer(inv -> inv.getArgument(0));

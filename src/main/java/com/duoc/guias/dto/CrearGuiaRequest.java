@@ -36,6 +36,10 @@ public class CrearGuiaRequest {
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate fechaDespacho;
 
+    // Semana 8 (opcional): si es true, el evento se marca para que el consumidor lo
+    // rechace y RabbitMQ lo envie a la Cola 2 (dead-letter). Solo para demostrar el flujo.
+    private boolean forzarError;
+
     public CrearGuiaRequest() { }
 
     public CrearGuiaRequest(String numeroGuia, String transportista, String destinatario,
@@ -60,4 +64,6 @@ public class CrearGuiaRequest {
     public void setDescripcion(String descripcion) { this.descripcion = descripcion; }
     public LocalDate getFechaDespacho() { return fechaDespacho; }
     public void setFechaDespacho(LocalDate fechaDespacho) { this.fechaDespacho = fechaDespacho; }
+    public boolean isForzarError() { return forzarError; }
+    public void setForzarError(boolean forzarError) { this.forzarError = forzarError; }
 }

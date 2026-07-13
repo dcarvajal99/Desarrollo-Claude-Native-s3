@@ -104,6 +104,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/guias").hasRole(rolGestion)             // consultar/listar
                 .requestMatchers(HttpMethod.GET, "/api/guias/*").hasRole(rolGestion)           // detalle
 
+                // Semana 8: consultar los eventos procesados desde la cola (rol gestion)
+                .requestMatchers(HttpMethod.GET, "/api/eventos").hasRole(rolGestion)
+
                 // cualquier otra cosa autenticada
                 .anyRequest().authenticated()
             )

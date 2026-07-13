@@ -1,0 +1,33 @@
+# Infraestructura de la Semana 8: RabbitMQ (2 colas + DLX) y PostgreSQL.
+# Ambos servicios corren en contenedores Docker (en local para desarrollo, y en la
+# misma EC2 para la entrega). La app Spring Boot se conecta a ellos.
+version: "3"
+services:
+
+  # --- Broker de mensajeria: cola 1 (principal) + cola 2 (dead-letter) ---
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"      # AMQP (lo usa Spring Boot)
+      - "15672:15672"    # consola web  http://localhost:15672  (guest/guest)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  # --- Base de datos donde el consumidor guarda los eventos de guias ---
+  #     (reemplaza a Oracle Cloud/RDS, que AWS Academy no permite crear).
+  postgres:
+    image: postgres:16
+    container_name: postgres-guias
+    ports:
+      - "5433:5432"      # 5433 en el host (5432 esta ocupado por un tunel ssh local)
+    environment:
+      POSTGRES_DB: guiasdb
+      POSTGRES_USER: guias
+      POSTGRES_PASSWORD: guias123
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

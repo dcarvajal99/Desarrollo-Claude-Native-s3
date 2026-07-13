@@ -109,10 +109,24 @@
             <version>2.8.17</version>
         </dependency>
 
-        <!-- Base de datos H2 en memoria -->
+        <!-- Mensajeria asincrona con RabbitMQ (AMQP) - Semana 8 (2 colas + DLX) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
+        <!-- Base de datos H2 en memoria (perfil por defecto / local) -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Driver de PostgreSQL: base del consumidor de la cola (Semana 8).
+             Se activa con el perfil "postgres" (BD en contenedor Docker en la EC2). -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
 
