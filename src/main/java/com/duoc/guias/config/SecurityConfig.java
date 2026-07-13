@@ -106,6 +106,8 @@ public class SecurityConfig {
 
                 // Semana 8: consultar los eventos procesados desde la cola (rol gestion)
                 .requestMatchers(HttpMethod.GET, "/api/eventos").hasRole(rolGestion)
+                // Semana 8: control del consumidor (pausar/reanudar) para la demo (rol gestion)
+                .requestMatchers("/api/consumidor/**").hasRole(rolGestion)
 
                 // cualquier otra cosa autenticada
                 .anyRequest().authenticated()

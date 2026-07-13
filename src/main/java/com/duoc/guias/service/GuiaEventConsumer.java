@@ -34,7 +34,9 @@ public class GuiaEventConsumer {
     }
 
     // ---- Consumidor de la COLA 1 ----
-    @RabbitListener(queues = "${app.rabbitmq.queue-principal}")
+    // id="consumidorCola1": permite pausar/reanudar este listener en caliente
+    // (ver ConsumidorController), util para demostrar la acumulacion de mensajes en la cola.
+    @RabbitListener(id = "consumidorCola1", queues = "${app.rabbitmq.queue-principal}")
     public void consumirEvento(EventoGuiaDTO evento) {
         log.info("Cola 1: evento '{}' recibido (guia {}, forzarError={})",
                 evento.getOperacion(), evento.getNumeroGuia(), evento.isForzarError());
