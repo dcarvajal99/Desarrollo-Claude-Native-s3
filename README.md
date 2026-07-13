@@ -7,6 +7,8 @@ Una empresa transportista genera **guías de despacho** en PDF, las guarda
 temporalmente en un **EFS** y las publica en **AWS S3** organizadas por fecha y
 transportista. Los endpoints se exponen detrás de un **API Gateway (AWS)** y se
 autentican/autorizan con **Azure AD B2C (IDaaS)** mediante **OAuth2 + roles**.
+Cada operación sobre las guías se publica de forma **asíncrona en RabbitMQ** (con
+cola de errores *dead-letter*) y un consumidor la persiste en **PostgreSQL**.
 El despliegue es automático vía **GitHub Actions** (Docker Hub → EC2).
 
 > **Evolución del proyecto**
@@ -15,6 +17,8 @@ El despliegue es automático vía **GitHub Actions** (Docker Hub → EC2).
 >   tokens JWT de **Azure AD** + registro de endpoints en **API Gateway**. Ver `SEMANA-05-OAUTH2-AZURE.md`.
 > - **Semana 6:** se agrega **autorización por roles** con *custom claims* de **Azure AD B2C**.
 >   Ver `SEMANA-06-ROLES.md`.
+> - **Semana 8:** mensajería asíncrona con **dos colas RabbitMQ** (principal + *dead-letter*)
+>   y consumidor que persiste los eventos en **PostgreSQL**. Ver sección *Mensajería asíncrona*.
 
 ## Arquitectura
 
@@ -32,11 +36,47 @@ dto/         CrearGuiaRequest, ActualizarGuiaRequest, GuiaDTO,
 config/      S3Config              -> bean S3Client (DefaultCredentialsProvider)
              SecurityConfig        -> OAuth2 Resource Server + autorización por roles
              OpenApiConfig         -> Swagger UI
+             RabbitMQConfig        -> 2 colas (principal + dead-letter) + exchange DLX
+service/     GuiaEventProducer     -> publica los eventos de guías en la Cola 1
+             GuiaEventConsumer     -> consume la Cola 1 (guarda en BD) y la Cola 2 (errores)
+model/       Guia, EventoGuia      -> entidades JPA (EventoGuia = tabla nueva de eventos)
 aspect/      LoggingAspect         -> @Around sobre la capa service
 exception/   GlobalExceptionHandler, ResourceNotFoundException, StorageException
 ```
 
 Flujo de almacenamiento: **EFS (temporal) → S3 (definitivo)**.
+
+## Mensajería asíncrona (RabbitMQ · Semana 8)
+
+Cada operación sobre una guía (crear, actualizar, eliminar, subir a S3) publica un
+**evento** en una cola de RabbitMQ. Un consumidor lo lee y lo guarda en una **tabla nueva**
+(`eventos_guia`) en **PostgreSQL**. Si un mensaje falla, RabbitMQ lo redirige a una
+**segunda cola** (patrón *dead-letter*) que almacena los mensajes con error.
+
+```
+Operación de guía
+    └─► COLA 1  (guias.eventos.queue)
+             ├─ OK    → consumidor → tabla eventos_guia (PostgreSQL)
+             └─ falla → DLX (guias.dlx) → COLA 2 (guias.eventos.error.queue)
+```
+
+| Componente | Rol |
+|---|---|
+| `docker-compose.yml` | Levanta **RabbitMQ** (`rabbitmq:3-management`) y **PostgreSQL** (`postgres:16`) |
+| Cola 1 `guias.eventos.queue` | Cola principal, durable, con `x-dead-letter-exchange` hacia el DLX |
+| Exchange `guias.dlx` + Cola 2 `guias.eventos.error.queue` | Dead-letter: almacena los mensajes que fallan |
+| `GuiaEventProducer` | Publica los eventos en la Cola 1 |
+| `GuiaEventConsumer` | `@RabbitListener` de la Cola 1 (persiste; si falla → rechaza → Cola 2) y de la Cola 2 |
+| `EventoGuia` / `eventos_guia` | Tabla nueva donde se guardan los eventos procesados |
+| `GET /api/eventos` | Verifica los eventos guardados (rol `gestion`) |
+
+**Demostrar el flujo de error:** en el `POST /api/guias`, enviar `"forzarError": true` marca
+el evento para que el consumidor lo rechace y termine en la Cola 2.
+
+### Perfiles de base de datos
+- **Sin perfil** → **H2** en memoria (desarrollo rápido).
+- **Perfil `postgres`** → **PostgreSQL** (contenedor Docker / EC2). La tabla `eventos_guia` queda ahí.
+  Se activa con `SPRING_PROFILES_ACTIVE=postgres`.
 
 ## Seguridad — OAuth2 + Azure AD B2C + Roles
 
@@ -142,13 +182,23 @@ en `application.properties` (no requieren variables en el `docker run`).
 ## Ejecutar localmente
 
 ```bash
-./mvnw spring-boot:run        # http://localhost:8080
-./mvnw test                   # corre las pruebas (EFS + S3 + servicio + contexto)
+# 1) Levantar la infraestructura (RabbitMQ + PostgreSQL) en Docker
+docker compose up -d
+#    Consola RabbitMQ: http://localhost:15672  (guest/guest)
+#    PostgreSQL:        localhost:5433  (BD guiasdb, user guias)
+
+# 2a) Arrancar con H2 (rápido, sin perfil)
+./mvnw spring-boot:run
+
+# 2b) o arrancar con PostgreSQL (perfil postgres, como en la EC2)
+SPRING_PROFILES_ACTIVE=postgres ./mvnw spring-boot:run
+
+./mvnw test                   # corre las pruebas (mockean RabbitMQ/S3/Azure)
 ```
 
 > En local, sin credenciales de AWS, los endpoints que tocan S3 fallarán con
-> `502` (StorageException); el resto del flujo (crear/consultar/descargar desde EFS)
-> funciona contra `./efs-local`.
+> `502` (StorageException); el resto del flujo (crear/consultar/descargar desde EFS,
+> y la publicación de eventos en RabbitMQ) funciona contra `./efs-local`.
 >
 > Para validar tokens reales de Azure B2C en local, la app necesita acceso a internet
 > (descarga las claves públicas del `jwk-set-uri`).
