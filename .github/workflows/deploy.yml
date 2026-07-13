@@ -49,23 +49,49 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-      # Paso 6: Conectarse a EC2 y desplegar el contenedor montando el EFS
+      # Paso 6: Conectarse a EC2 y desplegar backend + RabbitMQ + PostgreSQL (Semana 8)
       - name: SSH commands to deploy
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${{ secrets.USER_SERVER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
             # Autenticar en DockerHub desde EC2
             echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
-            # Descargar la ultima version de la imagen
+
+            # --- Red Docker compartida: los 3 contenedores se ven por nombre ---
+            docker network create guias-net || true
+
+            # --- RabbitMQ (Semana 8): solo se crea si no existe (no se reinicia en cada deploy) ---
+            if [ -z "$(docker ps -q -f name=^rabbitmq$)" ]; then
+              docker rm -f rabbitmq || true
+              docker run -d --name rabbitmq --network guias-net \
+                -e RABBITMQ_DEFAULT_USER=guest -e RABBITMQ_DEFAULT_PASS=guest \
+                -p 5672:5672 -p 15672:15672 \
+                rabbitmq:3-management
+            fi
+
+            # --- PostgreSQL (Semana 8): solo se crea si no existe (conserva los datos) ---
+            if [ -z "$(docker ps -q -f name=^postgres-guias$)" ]; then
+              docker rm -f postgres-guias || true
+              docker run -d --name postgres-guias --network guias-net \
+                -e POSTGRES_DB=guiasdb -e POSTGRES_USER=guias -e POSTGRES_PASSWORD=guias123 \
+                -v pgdata:/var/lib/postgresql/data \
+                -p 5433:5432 \
+                postgres:16
+            fi
+
+            # --- Backend: se reemplaza en cada deploy ---
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/desarrollo-claude-native-s3:latest
-            # Parar y eliminar cualquier contenedor previo
             docker stop desarrollo-claude-native-s3 || true && docker rm desarrollo-claude-native-s3 || true
-            # Iniciar el contenedor montando el volumen EFS (/mnt/efs del host -> /app/efs del contenedor)
-            # y pasando las credenciales/datos de AWS S3 como variables de entorno.
-            # La config de Azure AD (issuer/audience para validar los JWT) ya viene con su valor
-            # por defecto en application.properties, por lo que no necesita variables aqui.
-            docker run -d --name desarrollo-claude-native-s3 \
+            # Se conecta a rabbitmq y postgres por su NOMBRE de contenedor (misma red guias-net).
+            # Perfil "postgres" para que use PostgreSQL (tabla de eventos de la cola).
+            docker run -d --name desarrollo-claude-native-s3 --network guias-net \
               -v /mnt/efs:/app/efs \
               -e EFS_PATH=/app/efs \
+              -e SPRING_PROFILES_ACTIVE=postgres \
+              -e DB_URL=jdbc:postgresql://postgres-guias:5432/guiasdb \
+              -e DB_USER=guias \
+              -e DB_PASSWORD=guias123 \
+              -e RABBITMQ_HOST=rabbitmq \
               -e S3_BUCKET=${{ secrets.S3_BUCKET }} \
               -e AWS_REGION=us-east-1 \
               -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
