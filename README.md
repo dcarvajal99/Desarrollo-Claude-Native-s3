@@ -1,6 +1,5 @@
 # Desarrollo-Claude-Native
 
-test01
 Microservicio del **Sistema de Gestión de Pedidos y Generación de Guías de Despacho**
 (*Desarrollo Cloud Native* · CDY2204 · Duoc UC).
 
